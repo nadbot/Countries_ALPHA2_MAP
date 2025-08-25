@@ -6,6 +6,9 @@ The original input comes from naturalearthdata.com, the Admin 0 – Countries po
 The data is then filtered to only contain the Name, Abbreviation, Iso/Alpha codes and the geometry.
 
 To replicate the data, follow the script below.
+# Note
+This data contains only specific columns that are relevant for me, renames Åland to have the alpha 2 code FI (to correspond to Finland) and sorts the entries by 
+alpha 2 code, such that the biggest country is always first per alpha 2 code.
 
 # Script
 1. Download the country POV from https://www.naturalearthdata.com/downloads/10m-cultural-vectors/
@@ -18,9 +21,31 @@ To replicate the data, follow the script below.
 import geopandas as gpd
 import numpy as np
 input_file = ...
+
 gdf = gpd.read_file(input_file, driver='ESRI Shapefile')
-filtered_data = gdf[['NAME', 'NAME_LONG', 'ABBREV', 'NAME_CIAWF', 'ISO_A2_EH', 'ISO_A3_EH', 'CONTINENT', 'geometry']]
-filtered_data['COUNTRY_NAME'] = np.where(filtered_data['NAME_CIAWF'].notna(), filtered_data['NAME_CIAWF'], filtered_data['NAME'])
+cols = ['NAME', 'NAME_LONG', 'ABBREV', 'NAME_CIAWF', 'ISO_A2_EH', 'ISO_A3_EH', 'CONTINENT', 'geometry']
+filtered_data = gdf.loc[:, cols].copy()
+
+# Prefer NAME_CIAWF, fall back to NAME
+filtered_data['COUNTRY_NAME'] = filtered_data['NAME_CIAWF'].fillna(filtered_data['NAME'])
+
+# Compute lengths in meters for correct ordering
+proj = filtered_data.estimate_utm_crs() if filtered_data.crs is not None else "EPSG:3857"
+filtered_data['geom_length'] = filtered_data.to_crs(proj).geometry.length
+
+# Fix Åland label and ISO mapping without chained assignment
+mask_ax = filtered_data['ISO_A2_EH'] == 'AX'
+filtered_data.loc[mask_ax, 'COUNTRY_NAME'] = 'Åland'
+filtered_data.loc[mask_ax, 'ISO_A2_EH'] = 'FI'
+
+# Sort by ISO then length (descending); reset index
+filtered_data = (
+    filtered_data
+    .sort_values(['ISO_A2_EH', 'geom_length'], ascending=[True, False], na_position='last')
+    .reset_index(drop=True)
+)
+
 filtered_data.to_file(input_file.replace('shp', 'geojson'), driver='GeoJSON')
+
 
 ```
